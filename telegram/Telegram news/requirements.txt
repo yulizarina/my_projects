@@ -1,0 +1,4 @@
+python-telegram-bot[job-queue]>=22.6,<23
+httpx[socks]>=0.27,<0.29
+beautifulsoup4>=4.12,<5
+tzdata; sys_platform == "win32"
