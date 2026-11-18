@@ -1,0 +1,136 @@
+import java.io.*;
+import java.util.Arrays;
+
+public class Main {
+    static final boolean TRAIN_NEW_AGENT = true;
+    static final String AGENT_FILE = "agent.ser";
+    static final double MAX_KEEPER_VELOCITY = 10.0;
+
+    public static void main(String[] args) {
+        World world = new World();
+        NeuralNetwork nn;
+
+        if (TRAIN_NEW_AGENT) {
+            nn = new NeuralNetwork();
+
+            TrainingExampleGenerator teg = new TrainingExampleGenerator();
+            TrainingExample[] trainingExamples = teg.generate();
+
+            Trainer trainer = new Trainer(nn, trainingExamples, 100);
+            System.out.println("Training started.");
+            trainer.train();
+
+            saveAgent(nn);
+        } else {
+            nn = loadAgent();
+
+            if (nn == null) {
+                System.out.println("No saved agent found. Training new agent.");
+
+                nn = new NeuralNetwork();
+
+                TrainingExampleGenerator teg = new TrainingExampleGenerator();
+                TrainingExample[] trainingExamples = teg.generate();
+
+                Trainer trainer = new Trainer(nn, trainingExamples, 1000);
+                trainer.train();
+
+                saveAgent(nn);
+            }
+        }
+
+        testAgent(world, nn);
+
+        Screen screen = new Screen();
+        NeuralNetwork finalNn = nn;
+
+        screen.setShootAgainAction(() -> shoot(world, finalNn, screen));
+
+        screen.showScreen();
+        shoot(world, nn, screen);
+    }
+
+    public static void shoot(World world, NeuralNetwork nn, Screen screen) {
+        world.reset();
+
+        double[] outputs = nn.getOutputs(world.getInputs());
+
+        double normalizedKeeperVelocity = outputs[0];
+        double realKeeperVelocity = normalizedKeeperVelocity * MAX_KEEPER_VELOCITY;
+        double displayKeeperVelocity = realKeeperVelocity / 10.0;
+
+        System.out.println("----------------------");
+        System.out.println("NN output: " + Arrays.toString(outputs));
+        System.out.println("Real keeper velocity: " + realKeeperVelocity);
+        System.out.println("Display keeper velocity: " + displayKeeperVelocity);
+
+        screen.panel.startSimulation(
+                world.ball.position.x,
+                world.ball.position.y,
+                world.ball.velocity.x / 10.0,
+                world.ball.velocity.y / 10.0,
+                displayKeeperVelocity
+        );
+    }
+
+    public static void testAgent(World world, NeuralNetwork nn) {
+        int shots = 10000000;
+        int saves = 0;
+
+        for (int i = 0; i < shots; i++) {
+            world.reset();
+
+            double[] outputs = nn.getOutputs(world.getInputs());
+            double keeperVelocity = outputs[0] * MAX_KEEPER_VELOCITY;
+
+            double time = world.ball.position.y / world.ball.velocity.y;
+
+            double ballFinalX = world.ball.position.x + world.ball.velocity.x * time;
+            double keeperFinalX = world.keeper.position.x + keeperVelocity * time;
+
+            double goalTop = (world.pitch.width - world.goal_width) / 2.0;
+            double goalBottom = goalTop + world.goal_width;
+
+            double minKeeperX = goalTop + world.keeper.saveRange / 2.0;
+            double maxKeeperX = goalBottom - world.keeper.saveRange / 2.0;
+
+            keeperFinalX = Math.max(minKeeperX, Math.min(maxKeeperX, keeperFinalX));
+
+            boolean insideGoal = ballFinalX >= goalTop && ballFinalX <= goalBottom;
+            boolean saved = insideGoal && Math.abs(ballFinalX - keeperFinalX) <= world.keeper.saveRange / 2.0;
+
+            if (saved) saves++;
+        }
+
+        System.out.println("Total shots: " + shots);
+        System.out.println("Total saves: " + saves);
+        System.out.println("Save rate: " + ((double) saves / shots));
+    }
+
+    public static void saveAgent(NeuralNetwork nn) {
+        try {
+            ObjectOutputStream out = new ObjectOutputStream(new FileOutputStream(AGENT_FILE));
+            out.writeObject(nn);
+            out.close();
+
+            System.out.println("Agent saved.");
+        } catch (Exception e) {
+            System.out.println("Could not save agent.");
+            System.out.println(e.getMessage());
+        }
+    }
+
+    public static NeuralNetwork loadAgent() {
+        try {
+            ObjectInputStream in = new ObjectInputStream(new FileInputStream(AGENT_FILE));
+            NeuralNetwork nn = (NeuralNetwork) in.readObject();
+            in.close();
+
+            System.out.println("Agent loaded.");
+            return nn;
+        } catch (Exception e) {
+            System.out.println("Could not load agent.");
+            return null;
+        }
+    }
+}
